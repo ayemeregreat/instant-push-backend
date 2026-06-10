@@ -1,17 +1,34 @@
 import admin from 'firebase-admin';
 import webpush from 'web-push';
 
+// Debug: log environment variables (without exposing full private key)
+console.log('VAPID_PUBLIC_KEY exists?', !!process.env.VAPID_PUBLIC_KEY);
+console.log('VAPID_PRIVATE_KEY exists?', !!process.env.VAPID_PRIVATE_KEY);
+console.log('VAPID_CONTACT_EMAIL exists?', !!process.env.VAPID_CONTACT_EMAIL);
+console.log('FIREBASE_PROJECT_ID exists?', !!process.env.FIREBASE_PROJECT_ID);
+
 if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    }),
-  });
+  try {
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+      }),
+    });
+    console.log('Firebase initialized');
+  } catch (err) {
+    console.error('Firebase init error:', err.message);
+    throw err; // crash with clear error
+  }
 }
 
 const db = admin.firestore();
+
+// Check VAPID keys before setting
+if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+  throw new Error('Missing VAPID keys in environment');
+}
 
 webpush.setVapidDetails(
   process.env.VAPID_CONTACT_EMAIL || 'mailto:you@example.com',
@@ -20,12 +37,18 @@ webpush.setVapidDetails(
 );
 
 export default async function handler(req, res) {
+  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  if (req.method === 'OPTIONS') return res.status(200).end();
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
 
   const { title, body, url } = req.body;
   if (!title && !body) {
@@ -64,6 +87,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ success: true, count: snapshot.size });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 }
